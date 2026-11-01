@@ -274,6 +274,8 @@ def main(argv=None):
     ap.add_argument("--cache", type=Path, default=ROOT / "data" / "cache")
     ap.add_argument("--quick", action="store_true", help="6 participants, for smoke-testing")
     ap.add_argument("--n-jobs", type=int, default=-1)
+    ap.add_argument("--reuse-predictions", action="store_true",
+                    help="reuse cached LOSO predictions from --cache (skips refitting)")
     args = ap.parse_args(argv)
     out = args.out
     out.mkdir(parents=True, exist_ok=True)
@@ -303,7 +305,21 @@ def main(argv=None):
 
     # --- main models
     print("LOSO models ...")
-    preds = run_models(ep, feats, models, tasks, args.n_jobs)
+    pred_file = args.cache / f"predictions_{'quick' if args.quick else 'all'}.pkl"
+    preds = {}
+    if args.reuse_predictions and pred_file.exists():
+        with open(pred_file, "rb") as f:
+            preds = pickle.load(f)
+        print(f"  reusing {len(preds)} cached prediction sets")
+    if not all((t, m, tr) in preds for t in tasks for m in models for tr in ("all", "reliable")):
+        preds.update(run_models(ep, feats, models, tasks, args.n_jobs))
+
+    def save_preds():  # per-epoch predictions stay in the git-ignored cache
+        args.cache.mkdir(parents=True, exist_ok=True)
+        with open(pred_file, "wb") as f:
+            pickle.dump(preds, f)
+
+    save_preds()
     table, per_subj, cms = scenario_results(ep, preds, tasks, models)
     per_subj.to_csv(out / "per_participant_kappa.csv", index=False)
     cols = ["task", "model", "scenario", "pct_epochs_excluded", "n_epochs", "kappa_pooled",
@@ -339,10 +355,12 @@ def main(argv=None):
     for model in models:
         night = night_level_table(ep, preds[("sleep_wake", model, "all")], preds[("sleep_wake", model, "reliable")])
         night.round(2).to_csv(out / f"night_level_{model}.csv", index=False)
-        for m in ["TST", "SE", "WASO"]:
-            for s in ["no_gate", "impute", "exclude"]:
-                agree_rows.append({"model": model, "metric": m, "strategy": s,
-                                   **bland_altman(night[f"{m}_{s}"], night[f"{m}_psg"])})
+        subsets = {"all nights": night, "nights <=50% unreliable": night[night["pct_unreliable"] <= 50]}
+        for subset, nd in subsets.items():
+            for m in ["TST", "SE", "WASO"]:
+                for s in ["no_gate", "impute", "exclude"]:
+                    agree_rows.append({"model": model, "nights": subset, "metric": m, "strategy": s,
+                                       **bland_altman(nd[f"{m}_{s}"], nd[f"{m}_psg"])})
         plot_bland_altman(night, model, out / f"bland_altman_{model}.png")
     agree = pd.DataFrame(agree_rows)
     agree.to_csv(out / "night_level_agreement.csv", index=False)
@@ -369,9 +387,13 @@ def main(argv=None):
             y = task_labels(ep["stage"].to_numpy(), task)
             if name == "motion+hr+time":
                 p = preds[(task, "rf", "all")]
+            elif ("ablation", name, task) in preds:
+                p = preds[("ablation", name, task)]
             else:
                 p = loso_predict(ep[cols_].to_numpy(float), y, groups, "rf",
                                  model_factory=lambda n: make_model(n, n_jobs=args.n_jobs))
+                preds[("ablation", name, task)] = p
+                save_preds()
             r = evaluate_predictions(y, p, groups, task, np.ones(len(y), bool))
             abl.append({"features": name, "task": task, "kappa_pooled": r["kappa_pooled"],
                         "kappa_subject_mean": r["kappa_subject_mean"], "accuracy": r["accuracy"]})
@@ -388,8 +410,7 @@ def main(argv=None):
         "runtime_min": round((time.time() - t_start) / 60, 1),
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=1))
-    with open(args.cache / "predictions.pkl", "wb") as f:  # per-epoch, stays git-ignored
-        pickle.dump(preds, f)
+    save_preds()
     print(f"Done in {summary['runtime_min']} min. Results in {out}")
 
 

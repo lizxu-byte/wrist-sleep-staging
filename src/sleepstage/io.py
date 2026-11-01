@@ -4,7 +4,7 @@ File formats (verified against PhysioNet sleep-accel v1.0.0):
 
 * ``labels/<id>_labeled_sleep.txt``  - ``t stage`` (space separated); ``t`` in
   seconds since PSG start, one row per 30 s epoch. Stage codes: 0 wake, 1 N1,
-  2 N2, 3 N3, 5 REM, -1 unscored. Code 4 also occurs in four participants but is
+  2 N2, 3 N3, 5 REM, -1 unscored. Code 4 also occurs (356 epochs, three participants) but is
   not documented on the dataset page; it is treated as N3 (Rechtschaffen & Kales
   stage 4 is merged into N3 under AASM rules). See :data:`STAGE_MAP`.
 * ``heart_rate/<id>_heartrate.txt``  - ``t,hr`` (comma separated), bpm, irregular
