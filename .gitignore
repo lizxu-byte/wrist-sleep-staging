@@ -218,3 +218,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- project-specific ---
+# Raw / per-epoch data must never be committed (PhysioNet sleep-accel, ODC-By 1.0).
+/data/
+*.part
+# Intermediate per-epoch caches
+/results/cache/
